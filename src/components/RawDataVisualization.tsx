@@ -15,15 +15,16 @@ import {
 
 interface RawSensorData {
   _id: string;
-  machineId: string;
+  machine_id: string; 
   timestamp_rpi: string;
   temperature_c: number;
   accel_x_g: number;
   accel_y_g: number;
   accel_z_g: number;
-  raw_sound_analog: number;
-  fault_type: string;
-  __v: number;
+  raw_sound_analog?: number; 
+  sound_amplitude: number;   
+  fault_type?: string;
+  __v?: number;
 }
 
 interface RawDataVisualizationProps {
@@ -40,38 +41,58 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
     const now = new Date();
     const hoursBack = selectedTimeRange === '1h' ? 1 : selectedTimeRange === '6h' ? 6 : 24;
     const cutoffTime = new Date(now.getTime() - hoursBack * 60 * 60 * 1000);
-    
     return data.filter(d => new Date(d.timestamp_rpi) >= cutoffTime);
   };
 
   const filteredData = getFilteredData();
 
-  // Calculer les statistiques
+  // ✅ Statistiques avec gestion des cas vides
   const stats = {
     total_points: filteredData.length,
     faults_detected: filteredData.filter(d => d.fault_type !== 'Normal').length,
-    avg_temperature: filteredData.reduce((sum, d) => sum + d.temperature_c, 0) / filteredData.length,
-    max_acceleration: Math.max(...filteredData.map(d => Math.sqrt(d.accel_x_g ** 2 + d.accel_y_g ** 2 + d.accel_z_g ** 2))),
-    avg_sound: filteredData.reduce((sum, d) => sum + d.raw_sound_analog, 0) / filteredData.length
+    avg_temperature: filteredData.length > 0
+      ? filteredData.reduce((sum, d) => sum + (d.temperature_c || 0), 0) / filteredData.length
+      : 0,
+    max_acceleration: filteredData.length > 0
+      ? Math.max(...filteredData.map(d => Math.sqrt((d.accel_x_g || 0) ** 2 + (d.accel_y_g || 0) ** 2 + (d.accel_z_g || 0) ** 2)))
+      : 0,
+    avg_sound: filteredData.length > 0
+      ? filteredData.reduce((sum, d) => sum + (d.sound_amplitude ?? d.raw_sound_analog ?? 0), 0) / filteredData.length
+      : 0
   };
 
-  // Graphique série temporelle SVG
+  // ✅ Chart avec gestion de sound_amplitude et fallback
   const renderTimeSeriesChart = (dataKey: keyof RawSensorData, title: string, color: string, unit: string) => {
-    if (filteredData.length === 0) return null;
+    if (filteredData.length === 0) {
+      return (
+        <div className="w-full bg-card border rounded-lg p-4">
+          <h4 className="font-semibold mb-4">{title}</h4>
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            Aucune donnée disponible pour la période sélectionnée
+          </div>
+        </div>
+      );
+    }
 
     const chartWidth = 800;
     const chartHeight = 300;
     const padding = 50;
 
-    const values = filteredData.map(d => typeof d[dataKey] === 'number' ? d[dataKey] as number : 0);
-    const maxValue = Math.max(...values);
-    const minValue = Math.min(...values);
+    const values = filteredData.map(d => {
+      let value = 0;
+      if (typeof d[dataKey] === 'number') value = d[dataKey] as number;
+      else if (dataKey === 'sound_amplitude' && d.raw_sound_analog) value = d.raw_sound_analog;
+      return isNaN(value) ? 0 : value;
+    });
+
+    const maxValue = Math.max(...values, 1);
+    const minValue = Math.min(...values, 0);
     const range = maxValue - minValue || 1;
 
-    const xScale = (index: number) => 
-      padding + (index / (filteredData.length - 1)) * (chartWidth - 2 * padding);
-      
-    const yScale = (value: number) => 
+    const xScale = (index: number) =>
+      padding + (index / Math.max(filteredData.length - 1, 1)) * (chartWidth - 2 * padding);
+
+    const yScale = (value: number) =>
       chartHeight - padding - ((value - minValue) / range) * (chartHeight - 2 * padding);
 
     const pathData = values.map((value, index) => {
@@ -91,17 +112,15 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
             Plage: {minValue.toFixed(2)} - {maxValue.toFixed(2)} {unit}
           </div>
         </div>
-        
+
         <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
-          {/* Grille */}
           <defs>
             <pattern id={`grid-${dataKey}`} width="40" height="30" patternUnits="userSpaceOnUse">
               <path d="M 40 0 L 0 0 0 30" fill="none" stroke="hsl(var(--border))" strokeWidth="0.5"/>
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill={`url(#grid-${dataKey})`} />
-          
-          {/* Courbe principale */}
+
           <path
             d={pathData}
             stroke={color}
@@ -110,34 +129,30 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          
-          {/* Points de données avec code couleur selon fault_type */}
+
           {filteredData.map((point, index) => (
             <circle
-              key={point._id}
+              key={`${point._id || point.machine_id}-${index}`}
               cx={xScale(index)}
-              cy={yScale(typeof point[dataKey] === 'number' ? point[dataKey] as number : 0)}
+              cy={yScale(values[index])}
               r="2"
               fill={point.fault_type === 'Normal' ? color : 'hsl(var(--destructive))'}
               stroke="white"
               strokeWidth="1"
             >
               <title>
-                {`${new Date(point.timestamp_rpi).toLocaleTimeString()}: ${
-                  typeof point[dataKey] === 'number' ? (point[dataKey] as number).toFixed(3) : 'N/A'
-                }${unit} - ${point.fault_type}`}
+                {`${new Date(point.timestamp_rpi).toLocaleTimeString()}: ${values[index].toFixed(3)}${unit} - ${point.fault_type || 'Normal'}`}
               </title>
             </circle>
           ))}
-          
-          {/* Axes */}
+
           <text x={padding} y={chartHeight - 10} fontSize="12" fill="hsl(var(--muted-foreground))">
             {new Date(filteredData[0]?.timestamp_rpi).toLocaleTimeString()}
           </text>
           <text x={chartWidth - padding - 50} y={chartHeight - 10} fontSize="12" fill="hsl(var(--muted-foreground))">
             {new Date(filteredData[filteredData.length - 1]?.timestamp_rpi).toLocaleTimeString()}
           </text>
-          
+
           <text x={padding - 5} y={yScale(maxValue) + 5} fontSize="12" fill="hsl(var(--muted-foreground))" textAnchor="end">
             {maxValue.toFixed(2)}
           </text>
@@ -149,18 +164,15 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
     );
   };
 
-  // Analyse spectrale simulée (FFT-like visualization)
+  // Analyse spectrale (inchangée)
   const renderSpectralAnalysis = () => {
-    const frequencies = Array.from({ length: 50 }, (_, i) => i * 10); // 0-500 Hz
-    const amplitudes = frequencies.map(f => 
-      Math.exp(-f / 200) * (1 + 0.5 * Math.sin(f / 50)) * Math.random()
-    );
+    const frequencies = Array.from({ length: 50 }, (_, i) => i * 10);
+    const amplitudes = frequencies.map(f => Math.exp(-f / 200) * (1 + 0.5 * Math.sin(f / 50)) * Math.random());
 
     const chartWidth = 800;
     const chartHeight = 300;
     const padding = 50;
     const barWidth = (chartWidth - 2 * padding) / frequencies.length;
-
     const maxAmplitude = Math.max(...amplitudes);
 
     return (
@@ -169,14 +181,13 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
           <BarChart3 className="h-4 w-4" />
           <span>Analyse Spectrale (Simulation FFT)</span>
         </h4>
-        
+
         <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
-          {/* Barres de fréquence */}
           {frequencies.map((freq, index) => {
             const barHeight = (amplitudes[index] / maxAmplitude) * (chartHeight - 2 * padding);
             const x = padding + index * barWidth;
             const y = chartHeight - padding - barHeight;
-            
+
             return (
               <rect
                 key={index}
@@ -191,8 +202,7 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
               </rect>
             );
           })}
-          
-          {/* Axes */}
+
           <text x={padding} y={chartHeight - 10} fontSize="12" fill="hsl(var(--muted-foreground))">
             0 Hz
           </text>
@@ -206,7 +216,7 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
 
   return (
     <div className="space-y-6">
-      {/* Contrôles */}
+      {/* Carte principale */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
@@ -222,7 +232,6 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-4">
-            {/* Sélection plage temporelle */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Plage temporelle</label>
               <div className="flex gap-2">
@@ -239,7 +248,6 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
               </div>
             </div>
 
-            {/* Type de visualisation */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Type d'analyse</label>
               <div className="flex gap-2">
@@ -267,58 +275,21 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
 
       {/* Statistiques */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-2xl font-bold">{stats.total_points}</div>
-            <p className="text-sm text-muted-foreground">Points de données</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-2xl font-bold text-severity-critical">{stats.faults_detected}</div>
-            <p className="text-sm text-muted-foreground">Anomalies détectées</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-2xl font-bold">{stats.avg_temperature.toFixed(1)}°C</div>
-            <p className="text-sm text-muted-foreground">Temp. moyenne</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-2xl font-bold">{stats.max_acceleration.toFixed(3)}g</div>
-            <p className="text-sm text-muted-foreground">Accél. max</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-2xl font-bold">{stats.avg_sound.toFixed(0)}</div>
-            <p className="text-sm text-muted-foreground">Son moyen</p>
-          </CardContent>
-        </Card>
+        <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{stats.total_points}</div><p className="text-sm text-muted-foreground">Points de données</p></CardContent></Card>
+        <Card><CardContent className="pt-6"><div className="text-2xl font-bold text-severity-critical">{stats.faults_detected}</div><p className="text-sm text-muted-foreground">Anomalies détectées</p></CardContent></Card>
+        <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{stats.avg_temperature.toFixed(1)}°C</div><p className="text-sm text-muted-foreground">Temp. moyenne</p></CardContent></Card>
+        <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{stats.max_acceleration.toFixed(3)}g</div><p className="text-sm text-muted-foreground">Accél. max</p></CardContent></Card>
+        <Card><CardContent className="pt-6"><div className="text-2xl font-bold">{stats.avg_sound.toFixed(0)}</div><p className="text-sm text-muted-foreground">Son moyen</p></CardContent></Card>
       </div>
 
       {/* Visualisations */}
       {viewType === 'timeseries' && (
         <Tabs defaultValue="acceleration" className="space-y-4">
           <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="acceleration">
-              <Zap className="h-4 w-4 mr-1" />
-              Accélération
-            </TabsTrigger>
-            <TabsTrigger value="temperature">
-              <Thermometer className="h-4 w-4 mr-1" />
-              Température
-            </TabsTrigger>
-            <TabsTrigger value="sound">
-              <Volume2 className="h-4 w-4 mr-1" />
-              Son
-            </TabsTrigger>
-            <TabsTrigger value="combined">
-              <Activity className="h-4 w-4 mr-1" />
-              Vue globale
-            </TabsTrigger>
+            <TabsTrigger value="acceleration"><Zap className="h-4 w-4 mr-1" />Accélération</TabsTrigger>
+            <TabsTrigger value="temperature"><Thermometer className="h-4 w-4 mr-1" />Température</TabsTrigger>
+            <TabsTrigger value="sound"><Volume2 className="h-4 w-4 mr-1" />Son</TabsTrigger>
+            <TabsTrigger value="combined"><Activity className="h-4 w-4 mr-1" />Vue globale</TabsTrigger>
           </TabsList>
 
           <TabsContent value="acceleration" className="space-y-4">
@@ -331,14 +302,15 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
             {renderTimeSeriesChart('temperature_c', 'Température', 'hsl(25 95% 53%)', '°C')}
           </TabsContent>
 
+          {/* ✅ Utilisation de sound_amplitude */}
           <TabsContent value="sound">
-            {renderTimeSeriesChart('raw_sound_analog', 'Signal Sonore Brut', 'hsl(262 83% 58%)', '')}
+            {renderTimeSeriesChart('sound_amplitude', 'Signal Sonore', 'hsl(262 83% 58%)', '')}
           </TabsContent>
 
           <TabsContent value="combined">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {renderTimeSeriesChart('temperature_c', 'Température', 'hsl(25 95% 53%)', '°C')}
-              {renderTimeSeriesChart('raw_sound_analog', 'Signal Sonore', 'hsl(262 83% 58%)', '')}
+              {renderTimeSeriesChart('sound_amplitude', 'Signal Sonore', 'hsl(262 83% 58%)', '')}
             </div>
           </TabsContent>
         </Tabs>
@@ -350,9 +322,7 @@ export const RawDataVisualization = ({ data, machineId }: RawDataVisualizationPr
             {renderSpectralAnalysis()}
             <div className="mt-4 p-4 bg-muted/20 rounded-lg">
               <p className="text-sm text-muted-foreground">
-                <strong>Note:</strong> L'analyse spectrale permet d'identifier les fréquences caractéristiques 
-                des défauts mécaniques. Les pics à certaines fréquences peuvent indiquer des problèmes spécifiques 
-                (déséquilibre, défauts de roulements, etc.).
+                <strong>Note :</strong> L'analyse spectrale permet d'identifier les fréquences caractéristiques des défauts mécaniques.
               </p>
             </div>
           </CardContent>

@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS raw_sensor_data (
   accel_z_g DECIMAL(10,6),
   raw_sound_analog INTEGER,
   sound_amplitude DECIMAL(10,4),
+  current_a float8,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

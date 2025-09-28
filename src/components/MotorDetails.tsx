@@ -1,8 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Motor } from '@/data/mockData';
+import type { Motor } from '@/types/motor';
 import { SensorChart } from './SensorChart';
 import { AnomalyRecommendations } from './AnomalyRecommendations';
 import { RawDataVisualization } from './RawDataVisualization';
@@ -103,7 +104,7 @@ export const MotorDetails = ({ motor }: MotorDetailsProps) => {
               {getLatestValue(motor.vibrationData).toFixed(2)}
             </div>
             <div className="text-sm text-muted-foreground">
-              Unités relatives • Seuil: 50
+              Unités relatives • Seuil: 2
             </div>
             <div className="flex items-center mt-2">
               <TrendingUp className="h-4 w-4 mr-1 text-accent" />
@@ -124,7 +125,7 @@ export const MotorDetails = ({ motor }: MotorDetailsProps) => {
               {getLatestValue(motor.soundData).toFixed(1)} dB
             </div>
             <div className="text-sm text-muted-foreground">
-              Décibels • Seuil: 60 dB
+              Décibels • Seuil: 2500 dB
             </div>
             <div className="flex items-center mt-2">
               <TrendingUp className="h-4 w-4 mr-1 text-accent" />
@@ -145,7 +146,7 @@ export const MotorDetails = ({ motor }: MotorDetailsProps) => {
               {getLatestValue(motor.temperatureData).toFixed(1)}°C
             </div>
             <div className="text-sm text-muted-foreground">
-              Celsius • Seuil: 75°C
+              Celsius • Seuil: 55°C
             </div>
             <div className="flex items-center mt-2">
               <TrendingUp className="h-4 w-4 mr-1 text-accent" />
@@ -195,12 +196,26 @@ export const MotorDetails = ({ motor }: MotorDetailsProps) => {
           />
         </TabsContent>
 
-        <TabsContent value="rawdata">
-          <RawDataVisualization 
-            data={motor.rawSensorData}
-            machineId={motor.id}
-          />
-        </TabsContent>
+      <TabsContent value="rawdata">
+  <RawDataVisualization 
+    data={(motor.rawSensorData as any[]).map((item) => ({
+      _id: item._id,
+      machine_id: item.machineId ?? item.machine_id, 
+      timestamp_rpi: item.timestamp_rpi,
+      temperature_c: item.temperature_c,
+      accel_x_g: item.accel_x_g,
+      accel_y_g: item.accel_y_g,
+      accel_z_g: item.accel_z_g,
+      raw_sound_analog: item.raw_sound_analog,
+      sound_amplitude: item.soundAmplitude ?? item.sound_amplitude,
+      fault_type: item.fault_type,
+      __v: item.__v
+    }))}
+    machineId={motor.id}
+  />
+</TabsContent>
+
+
 
         <TabsContent value="predictions">
           <RealTimePredictions machineId={motor.id} />

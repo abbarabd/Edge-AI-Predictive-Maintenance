@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import type { Motor } from '@/data/mockData';
+import type { Motor } from '@/types/motor';
 import { AnomalyRecommendations } from './AnomalyRecommendations';
 import { 
   AlertTriangle, 

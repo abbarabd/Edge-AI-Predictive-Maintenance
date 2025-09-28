@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import type { SensorData } from '@/data/mockData';
+import type { SensorData } from '@/types/motor';
 import { TrendingUp, AlertTriangle } from 'lucide-react';
 
 interface SensorChartProps {
